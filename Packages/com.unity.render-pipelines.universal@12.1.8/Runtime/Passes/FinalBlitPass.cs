@@ -57,6 +57,9 @@ namespace UnityEngine.Rendering.Universal.Internal
             {
                 GetActiveDebugHandler(renderingData)?.UpdateShaderGlobalPropertiesForFinalValidationPass(cmd, ref cameraData, true);
 
+                if (cameraData.camera.CompareTag("UICamera"))
+                    cmd.EnableShaderKeyword(ShaderKeywordStrings.SRGBToLinearConversion);
+
                 CoreUtils.SetKeyword(cmd, ShaderKeywordStrings.LinearToSRGBConversion,
                     cameraData.requireSrgbConversion);
 
@@ -119,6 +122,8 @@ namespace UnityEngine.Rendering.Universal.Internal
                     cmd.SetViewProjectionMatrices(camera.worldToCameraMatrix, camera.projectionMatrix);
                     cameraData.renderer.ConfigureCameraTarget(cameraTarget, cameraTarget);
                 }
+
+                cmd.DisableShaderKeyword(ShaderKeywordStrings.SRGBToLinearConversion);
             }
 
             context.ExecuteCommandBuffer(cmd);

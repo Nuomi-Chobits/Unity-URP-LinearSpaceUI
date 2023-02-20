@@ -14,13 +14,14 @@ namespace UnityEngine.Rendering.Universal.Internal
     {
         FilteringSettings m_FilteringSettings;
         RenderStateBlock m_RenderStateBlock;
+        RenderTargetHandle m_UguiTarget;
         List<ShaderTagId> m_ShaderTagIdList = new List<ShaderTagId>();
         string m_ProfilerTag;
         ProfilingSampler m_ProfilingSampler;
         bool m_IsOpaque;
 
         bool m_UseDepthPriming;
-
+        bool m_IsGameViewUI;
         static readonly int s_DrawObjectPassDataPropID = Shader.PropertyToID("_DrawObjectPassData");
 
         public DrawObjectsPass(string profilerTag, ShaderTagId[] shaderTagIds, bool opaque, RenderPassEvent evt, RenderQueueRange renderQueueRange, LayerMask layerMask, StencilState stencilState, int stencilReference)
@@ -56,6 +57,16 @@ namespace UnityEngine.Rendering.Universal.Internal
             m_ProfilingSampler = ProfilingSampler.Get(profileId);
         }
 
+        public void Setup(bool isGameViewUI)
+        {
+            m_IsGameViewUI = isGameViewUI;
+        }
+        
+        public void Setup(RenderTargetHandle uiTargetHandle,bool isGameViewUI)
+        {
+            m_UguiTarget = uiTargetHandle;
+            m_IsGameViewUI = isGameViewUI;
+        }
         public override void OnCameraSetup(CommandBuffer cmd, ref RenderingData renderingData)
         {
             if (renderingData.cameraData.renderer.useDepthPriming && m_IsOpaque && (renderingData.cameraData.renderType == CameraRenderType.Base || renderingData.cameraData.clearDepth))
@@ -98,12 +109,21 @@ namespace UnityEngine.Rendering.Universal.Internal
                 cmd.Clear();
 
                 Camera camera = renderingData.cameraData.camera;
+
+                if (m_IsGameViewUI)
+                    cmd.SetGlobalFloat(ShaderPropertyId.isInUICamera,1);
+#if UNITY_EDITOR
+                else if(m_FilteringSettings.layerMask == LayerMask.GetMask("UI") && renderingData.cameraData.isSceneViewCamera)
+                    cmd.SetGlobalFloat(ShaderPropertyId.isInUICamera,1);
+#endif
+                else 
+                    cmd.SetGlobalFloat(ShaderPropertyId.isInUICamera,0);
+
                 var sortFlags = (m_IsOpaque) ? renderingData.cameraData.defaultOpaqueSortFlags : SortingCriteria.CommonTransparent;
                 if (renderingData.cameraData.renderer.useDepthPriming && m_IsOpaque && (renderingData.cameraData.renderType == CameraRenderType.Base || renderingData.cameraData.clearDepth))
                     sortFlags = SortingCriteria.SortingLayer | SortingCriteria.RenderQueue | SortingCriteria.OptimizeStateChanges | SortingCriteria.CanvasOrder;
 
                 var filterSettings = m_FilteringSettings;
-
 #if UNITY_EDITOR
                 // When rendering the preview camera, we want the layer mask to be forced to Everything
                 if (renderingData.cameraData.isPreviewCamera)
@@ -111,6 +131,13 @@ namespace UnityEngine.Rendering.Universal.Internal
                     filterSettings.layerMask = -1;
                 }
 #endif
+
+                if (m_IsGameViewUI && m_UguiTarget != default)
+                {
+                    cmd.SetRenderTarget(m_UguiTarget.Identifier());
+                    context.ExecuteCommandBuffer(cmd);
+                    cmd.Clear();
+                }
 
                 DrawingSettings drawSettings = CreateDrawingSettings(m_ShaderTagIdList, ref renderingData, sortFlags);
 

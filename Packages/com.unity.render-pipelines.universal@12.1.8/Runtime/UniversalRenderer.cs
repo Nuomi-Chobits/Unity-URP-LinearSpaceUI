@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine.Rendering.Universal.Internal;
+using UnityEngine.Experimental.Rendering;
 
 namespace UnityEngine.Rendering.Universal
 {
@@ -97,6 +98,10 @@ namespace UnityEngine.Rendering.Universal
         InvokeOnRenderObjectCallbackPass m_OnRenderObjectCallbackPass;
         FinalBlitPass m_FinalBlitPass;
         CapturePass m_CapturePass;
+
+        NoPostProcessPass m_NoPostProcessPass;
+        DrawObjectsPass m_UguiPass;
+
 #if ENABLE_VR && ENABLE_XR_MODULE
         XROcclusionMeshPass m_XROcclusionMeshPass;
         CopyDepthPass m_XRCopyDepthPass;
@@ -117,6 +122,7 @@ namespace UnityEngine.Rendering.Universal
         // For tiled-deferred shading.
         RenderTargetHandle m_DepthInfoTexture;
         RenderTargetHandle m_TileDepthInfoTexture;
+        RenderTargetHandle m_UguiTaget;
 
         ForwardLights m_ForwardLights;
         DeferredLights m_DeferredLights;
@@ -307,6 +313,10 @@ namespace UnityEngine.Rendering.Universal
             m_CapturePass = new CapturePass(RenderPassEvent.AfterRendering);
             m_FinalBlitPass = new FinalBlitPass(RenderPassEvent.AfterRendering + 1, m_BlitMaterial);
 
+            m_UguiPass = new DrawObjectsPass("UGUI", false, RenderPassEvent.BeforeRenderingTransparents +1,
+                RenderQueueRange.transparent, LayerMask.GetMask("UI"), m_DefaultStencilState,
+                stencilData.stencilReference);
+            m_NoPostProcessPass = new NoPostProcessPass(RenderPassEvent.AfterRenderingPostProcessing + 1, m_BlitMaterial);
 #if UNITY_EDITOR
             m_FinalDepthCopyPass = new CopyDepthPass(RenderPassEvent.AfterRendering + 9, m_CopyDepthMaterial);
 #endif
@@ -320,6 +330,7 @@ namespace UnityEngine.Rendering.Universal
             m_OpaqueColor.Init("_CameraOpaqueTexture");
             m_DepthInfoTexture.Init("_DepthInfoTexture");
             m_TileDepthInfoTexture.Init("_TileDepthInfoTexture");
+            m_UguiTaget.Init("_UIColorTexture");
 
             supportedRenderingFeatures = new RenderingFeatures();
 
@@ -423,10 +434,17 @@ namespace UnityEngine.Rendering.Universal
 
             // Special path for depth only offscreen cameras. Only write opaques + transparents.
             bool isOffscreenDepthTexture = cameraData.targetTexture != null && cameraData.targetTexture.format == RenderTextureFormat.Depth;
+            
+            bool isUICamera = camera.CompareTag("UICamera");
+
             if (isOffscreenDepthTexture)
             {
                 ConfigureCameraTarget(BuiltinRenderTextureType.CameraTarget, BuiltinRenderTextureType.CameraTarget);
                 AddRenderPasses(ref renderingData);
+
+                if(isUICamera)
+                    ConfigureCameraTarget(m_UguiTaget.id,m_UguiTaget.id);
+
                 EnqueuePass(m_RenderOpaqueForwardPass);
 
                 // TODO: Do we need to inject transparents and skybox when rendering depth only camera? They don't write to depth.
@@ -436,6 +454,7 @@ namespace UnityEngine.Rendering.Universal
                     return;
 #endif
                 EnqueuePass(m_RenderTransparentForwardPass);
+                EnqueuePass(m_UguiPass);
                 return;
             }
 
@@ -839,6 +858,18 @@ namespace UnityEngine.Rendering.Universal
             // However when there are render passes executing after post we avoid resolving to screen so rendering continues (before sRGBConvertion etc)
             bool resolvePostProcessingToCameraTarget = !hasCaptureActions && !hasPassesAfterPostProcessing && !applyFinalPostProcessing;
 
+            if (!anyPostProcessing && !isSceneViewCamera && camera.CompareTag("MainCamera"))
+            {
+                m_NoPostProcessPass.Setup(m_UguiTaget,m_ActiveCameraColorAttachment);
+                EnqueuePass(m_NoPostProcessPass);
+            }
+
+            if(isUICamera)
+            {
+                m_UguiPass.Setup(m_UguiTaget,true);
+                EnqueuePass(m_UguiPass);
+            }
+
             if (lastCameraInTheStack)
             {
                 SetupFinalPassDebug(ref cameraData);
@@ -880,7 +911,8 @@ namespace UnityEngine.Rendering.Universal
                 // We need final blit to resolve to screen
                 if (!cameraTargetResolved)
                 {
-                    m_FinalBlitPass.Setup(cameraTargetDescriptor, sourceForFinalPass);
+                    RenderTargetHandle finalTarget = isUICamera ? m_UguiTaget : m_ActiveCameraColorAttachment;
+                    m_FinalBlitPass.Setup(cameraTargetDescriptor, finalTarget);
                     EnqueuePass(m_FinalBlitPass);
                 }
 
@@ -980,6 +1012,8 @@ namespace UnityEngine.Rendering.Universal
                 cmd.ReleaseTemporaryRT(m_ActiveCameraDepthAttachment.id);
                 m_ActiveCameraDepthAttachment = RenderTargetHandle.CameraTarget;
             }
+
+             cmd.ReleaseTemporaryRT(m_UguiTaget.id);
         }
 
         void EnqueueDeferred(ref RenderingData renderingData, bool hasDepthPrepass, bool hasNormalPrepass, bool applyMainShadow, bool applyAdditionalShadow)
@@ -1130,6 +1164,17 @@ namespace UnityEngine.Rendering.Universal
                     depthDescriptor.colorFormat = RenderTextureFormat.Depth;
                     depthDescriptor.depthBufferBits = k_DepthStencilBufferBits;
                     cmd.GetTemporaryRT(m_ActiveCameraDepthAttachment.id, depthDescriptor, FilterMode.Point);
+                }
+
+                {
+                    var uiDescriptor = descriptor;
+                    uiDescriptor.useMipMap = false;
+                    uiDescriptor.autoGenerateMips = false;
+                    uiDescriptor.depthBufferBits = k_DepthStencilBufferBits;
+                    uiDescriptor.height = Screen.height;
+                    uiDescriptor.width = Screen.width;
+                    uiDescriptor.graphicsFormat = GraphicsFormat.R8G8B8A8_UNorm;
+                    cmd.GetTemporaryRT(m_UguiTaget.id, uiDescriptor, FilterMode.Bilinear);
                 }
             }
 
