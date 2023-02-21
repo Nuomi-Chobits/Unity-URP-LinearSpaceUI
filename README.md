@@ -2,6 +2,13 @@
 
 本工程是一个示例演示工程，主要参考了 https://github.com/TakeshiCho/UI_RenderPipelineInLinearSpace 的改动，更新到了URP12.1.8版本。
 
+This project is a demo showcasing a modification of the https://github.com/TakeshiCho/UI_RenderPipelineInLinearSpace, updated to URP12.1.8 version.
+
+
+更多信息请访问 -> https://tajourney.games/5995/
+
+For more information, please visit -> https://tajourney.games/5995/
+
 ## 演示结果
 
 工程中提供了两张我在PS中制作的测试图片，一张是在PS中输出对应RGB通道的颜色块，一张是RGB为
